@@ -19,6 +19,11 @@ try:
     base_locations = [SETTINGS.get("framework_path"), SETTINGS.get("project_root", None)]
     base_locations.extend(SETTINGS.get("library_locations"))
 
+    # AC Constants
+    ac_consts = SETTINGS.get("ac_constants", None)
+    if ac_consts:
+        os.environ["FPRIME_AC_CONSTANTS_FILE"] = ac_consts
+
     # Old code uses BUILD_ROOT variable, so we should generate it from settings.ini
     from fprime_ac.utils.buildroot import set_build_roots
     set_build_roots(":".join([str(location) for location in base_locations if location is not None]))
@@ -37,6 +42,8 @@ def main():
                         help="Configuration YAML file to read linting configuration. Default: fplint.yml, if available")
     parser.add_argument("models", nargs="*",
                         help="Topology model to run linting against. **/*TopologyAppAi.xml")
+    for key, vals in BaseCheck.get_all_extra_args().items():
+        parser.add_argument("--"+key, **vals)
     arguments = parser.parse_args()
 
     # Defailt config if possible
@@ -58,10 +65,8 @@ def main():
         sys.exit(1)
     success = True
     for model in models:
-        success = success and BaseCheck.run_all(model, excluded=config.get("exclusions", []), filters=config.get("filters", []))
+        success = success and BaseCheck.run_all(model, excluded=config.get("exclusions", []), filters=config.get("filters", []), arguments=arguments)
     sys.exit(0 if success else 1)
-
-
 
 if __name__ == "__main__":
     main()

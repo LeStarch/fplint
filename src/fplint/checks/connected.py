@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 
 
 from fprime_ac.models.Topology import Topology
@@ -7,7 +7,7 @@ from fprime_ac.models.exceptions import InvalidModel
 from .check import BaseCheck, CheckSeverity, CheckResult
 
 
-class PortConnectionChecks(BaseCheck):
+class PortConnections(BaseCheck):
     """ A check that all ports are connected """
 
     @classmethod
@@ -22,7 +22,7 @@ class PortConnectionChecks(BaseCheck):
             "conflicting-port-directions-in-connection": CheckSeverity.ERROR
         }
 
-    def run(self, result: CheckResult, model: Topology) -> CheckResult:
+    def run(self, result: CheckResult, model: Topology, extras: List[str]) -> CheckResult:
         """ Run the check """
         for component in model.get_comp_list():
             for port in component.get_ports():
@@ -43,6 +43,13 @@ class PortConnectionChecks(BaseCheck):
                                            "connected to non-existent port {}.{}:{}".format(target_comp.get_name(),
                                                                                             port.get_target_port(),
                                                                                             port.get_target_num()),
+                                           model, component, port)
+                        continue
+                    if target_port.get_max_number() is None or int(target_port.get_max_number()) <= port.get_target_num():
+                        result.add_problem("invalid-target-port-in-connection",
+                                           "connected to non-existent port {}.{}:{}. Note: increase configured limits"
+                                           .format(target_comp.get_name(), port.get_target_port(),
+                                                   port.get_target_num()),
                                            model, component, port)
                         continue
                 except InvalidModel as exc:

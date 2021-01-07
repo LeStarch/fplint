@@ -81,7 +81,7 @@ class BaseCheck(abc.ABC):
     @staticmethod
     def get_standard_identifier(topology: Topology, component: Component=None, port:Port=None):
         """ Get the standard identifier of a model object"""
-        tokens = [item.get_name() for item in [topology, component, port] if item is not None]
+        tokens = [item if isinstance(item, str) else item.get_name() for item in [topology, component, port] if item is not None]
         identifier = ".".join(tokens)
         if port is not None:
             identifier += ":{}".format(port.get_source_num())
@@ -94,12 +94,12 @@ class BaseCheck(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def get_identifiers(self) -> Dict[str, str]:
+    def get_identifiers(self) -> Dict[str, CheckSeverity]:
         """ Return a mapping from identifier to severity """
         raise NotImplemented("Must implement this method of the checker")
 
     @abc.abstractmethod
-    def run(self, result: CheckResult, model: Topology) -> CheckResult:
+    def run(self, result: CheckResult, model: Topology, extras: List[str]) -> CheckResult:
         """ Executes the check class actions.  Implement this for a new check"""
         raise NotImplemented("Must implement this method of the checker")
 
@@ -108,6 +108,19 @@ class BaseCheck(abc.ABC):
         """ Get all known lint identifiers """
         checkers = cls.get_checkers(excluded)
         return itertools.chain.from_iterable([checker.get_identifiers().keys() for checker in checkers])
+
+    @staticmethod
+    def get_extra_arguments():
+        return {}
+
+    @classmethod
+    def get_all_extra_args(cls, excluded: List[str] = None) -> Dict[str,Dict[str, str]]:
+        """ Get all known lint identifiers """
+        all_args = {}
+        checkers = cls.get_checkers(excluded)
+        for checker in checkers:
+            all_args.update(checker.get_extra_arguments())
+        return all_args
 
     @classmethod
     def get_checkers(cls, excluded: List[str] = None, candidate: Type = None) -> List[Type["BaseCheck"]]:
@@ -121,7 +134,7 @@ class BaseCheck(abc.ABC):
         return checkers
 
     @classmethod
-    def run_all(cls, model: Topology, excluded: List[str] = None, filters: List[str] = None):
+    def run_all(cls, model: Topology, excluded: List[str] = None, filters: List[str] = None, arguments=None):
         """ Runs all known checks"""
         excluded = excluded if excluded is not None else []
         filters = filters if filters is not None else []
@@ -130,9 +143,14 @@ class BaseCheck(abc.ABC):
         all_clear = True
         for checker in checkers:
             try:
+                needed_args = [arg.replace("-", "_") for arg in checker.get_extra_arguments().keys()]
+                filled_args = [getattr(arguments, needed, None) for needed in needed_args if getattr(arguments, needed, None) is not None]
+                if needed_args and arguments is None or len(needed_args) != len(filled_args):
+                    print("[FP-LINT] '{}' missing needed args. Skipping".format(checker.get_name()), file=sys.stderr)
+                    continue
                 print("[FP-LINT] Running check '{}'".format(checker.get_name()))
                 result = CheckResult(checker.get_identifiers())
-                result = checker().run(result, model)
+                result = checker().run(result, model, filled_args)
                 problems = result.get_filtered_problems(filters)
                 for problem in problems:
                     print(result.get_problem_message(problem), file=sys.stderr)
@@ -140,6 +158,5 @@ class BaseCheck(abc.ABC):
             except Exception as exc:
                 print("[ERROR] {} failed: {}".format(checker.get_name(), exc), file=sys.stderr)
                 all_clear = False
-                raise
-            return all_clear
+        return all_clear
 
