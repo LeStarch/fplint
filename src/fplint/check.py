@@ -1,24 +1,33 @@
+""" Checks definitions for the linters
+
+Specifies the base checks for the linter. This provides a notifier object "CheckResult", a enum of severities
+"CheckSeverity" and abstract base check class to implement children of "CheckBase".
+"""
 import abc
 import re
 import sys
 import inspect
 from enum import Enum
 import itertools
-
 from typing import Type, List, Union, Dict
 
-from fprime_ac.models.Topology import Topology
-from fprime_ac.models.Component import Component
-from fprime_ac.models.Port import Port
+# Load the model types through patcher
+from fplint.model.patcher import Port, Component, Topology
+
 
 class CheckSeverity(Enum):
     """ Severity of checks """
     WARNING = 0
     ERROR = 1
-    FATAL = 2 # Stops check
+
 
 class CheckResult:
-    """ Enumeration capturing linting results """
+    """
+    Notification object used when an error occurs. It takes in identifiers, messages, and models where possible to note
+    an error occurred and provide standard reporting formats of messages. In order to setup the check result, the
+    "CheckBase" class will provide a mapping of identifiers to severity. This is such that callers need only specify the
+    identifier and the message.
+        """
     def __init__(self, severity_map: Dict[str,CheckSeverity]):
         """ Initialize check result with severity mapping
 
@@ -49,17 +58,25 @@ class CheckResult:
                 "severity": severity,
                 "identifier": ident,
                 "message": message,
-                "module": BaseCheck.get_standard_identifier(top, comp, port)
+                "module": CheckBase.get_standard_identifier(top, comp, port)
             })
 
-    def get_filtered_problems(self, exclusions: List[Dict[str, Union[str, List[Dict[str, Union[str,re.Pattern]]]]]]):
-        """ Filter down the problems to non-excluded """
+    def get_filtered_problems(self, filters: List[Dict[str, Union[str, List[re.Pattern]]]]) -> List[dict]:
+        """ Returns list of notified problems filtered through the filtered list
+
+        Args:
+            filters: filters used to match problems such that they are ignored
+
+        Returns:
+            list of problems that are not filtered-out
+        """
         def is_excluded(problem):
             """ Check if a problem is excluded at all """
-            for exclusion in exclusions:
-                if not problem.get("identifier") == exclusion.get("identifier"):
+            for filt in filters:
+                # Not a matching identifier
+                if not problem.get("identifier") == filt.get("identifier"):
                     continue
-                specifiers = [property.get("specifier") for property in exclusion.get("properties", []) if "specifier" in property]
+                specifiers = filt.get("specifiers")
                 for specifier in specifiers:
                     if specifier.search(problem.get("module")):
                         return True
@@ -68,19 +85,33 @@ class CheckResult:
         return problems
 
     @staticmethod
-    def get_problem_message(problem):
-        """ Returns a problem message """
+    def get_problem_message(problem: dict) -> str:
+        """ Formats the standard problem message in a repoducible way """
         return "[{}] {}: {} found issue {}".format(problem.get("severity").name,
                                                    problem.get("identifier"),
                                                    problem.get("module"),
                                                    problem.get("message"))
 
 
-class BaseCheck(abc.ABC):
+class CheckBase(abc.ABC):
+    """
+    Base object for all checks in the system. This provides a set of helper methods to help implement checks as well as
+    a set of abstract methods to define the format of the check. It can also run all known check by inspecting
+    subclasses of the base check to find checks.
+    """
 
     @staticmethod
-    def get_standard_identifier(topology: Topology, component: Component=None, port:Port=None):
-        """ Get the standard identifier of a model object"""
+    def get_standard_identifier(topology: Topology = None, component: Component = None, port:Port = None) -> str:
+        """ Takes the model components and returns a str standard identifier
+
+        Args:
+            topology: topology model, ignored if None
+            component: component model, ignored if None
+            port: port model, ignored if None
+
+        Returns:
+            [top name].[comp name].[port name:port number]
+        """
         tokens = [item if isinstance(item, str) else item.get_name() for item in [topology, component, port] if item is not None]
         identifier = ".".join(tokens)
         if port is not None:
@@ -88,34 +119,52 @@ class BaseCheck(abc.ABC):
         return identifier
 
     @classmethod
-    def get_name(cls):
-        """ Returns the name of this checker. Default implementation returns class name. """
-        return cls.__name__
-
-    @classmethod
     @abc.abstractmethod
     def get_identifiers(self) -> Dict[str, CheckSeverity]:
-        """ Return a mapping from identifier to severity """
+        """ Return a mapping from identifier to severity
+
+        Gets a set of identifiers produced by this check, and the severity of that identifier. These are used in two
+        places:
+
+        1. It is stored in the CheckResult so users need not pass in the severity with the notify call
+        2. It is used in the list of "know identifiers" used for configuration
+
+        Returns:
+            Map of str to CheckSeverity for every identifier provides by this system
+        """
         raise NotImplemented("Must implement this method of the checker")
 
+    @staticmethod
+    def get_extra_arguments():
+        """ Implement this class in sub children if you need extra arguments"""
+        return {}
+
     @abc.abstractmethod
-    def run(self, result: CheckResult, model: Topology, extras: List[str]) -> CheckResult:
-        """ Executes the check class actions.  Implement this for a new check"""
+    def run(self, result: CheckResult, model: Topology, extras: List[str]):
+        """ Run the check
+
+        This is up to the base class. The base class will be provided a toplogy model, and a list of "extra" arguments
+        it needs. It can register problems to the provided check result.
+
+        Args:
+            result: call result.add_problem() to report a linting problem seen
+            model: topology model to lint
+            extras: extra arguments when asked
+        """
         raise NotImplemented("Must implement this method of the checker")
 
     @classmethod
     def get_all_identifiers(cls, excluded: List[str] = None):
-        """ Get all known lint identifiers """
+        """ Returns all known identifiers of all known implementers
+
+        This is passed to configuration to ensure that all filters are valid.
+        """
         checkers = cls.get_checkers(excluded)
         return itertools.chain.from_iterable([checker.get_identifiers().keys() for checker in checkers])
 
-    @staticmethod
-    def get_extra_arguments():
-        return {}
-
     @classmethod
     def get_all_extra_args(cls, excluded: List[str] = None) -> Dict[str,Dict[str, str]]:
-        """ Get all known lint identifiers """
+        """ Get all known lint identifiers by recursing through sub children """
         all_args = {}
         checkers = cls.get_checkers(excluded)
         for checker in checkers:
@@ -123,12 +172,12 @@ class BaseCheck(abc.ABC):
         return all_args
 
     @classmethod
-    def get_checkers(cls, excluded: List[str] = None, candidate: Type = None) -> List[Type["BaseCheck"]]:
-        """ Recurses through subclasses looking for non-abstract implementations """
+    def get_checkers(cls, excluded: List[str] = None, candidate: Type = None) -> List[Type["CheckBase"]]:
+        """ Recursively looks for known checkers found in the system """
         excluded = excluded if excluded is not None else []
         candidate = candidate if candidate is not None else cls
         # Check current class for non-abstract and not excluded
-        checkers = [candidate] if not inspect.isabstract(candidate) and candidate.get_name() not in excluded else []
+        checkers = [candidate] if not inspect.isabstract(candidate) and candidate.__name__ not in excluded else []
         for sub in candidate.__subclasses__():
             checkers.extend(cls.get_checkers(excluded, sub))
         return checkers
@@ -146,9 +195,9 @@ class BaseCheck(abc.ABC):
                 needed_args = [arg.replace("-", "_") for arg in checker.get_extra_arguments().keys()]
                 filled_args = [getattr(arguments, needed, None) for needed in needed_args if getattr(arguments, needed, None) is not None]
                 if needed_args and arguments is None or len(needed_args) != len(filled_args):
-                    print("[FP-LINT] '{}' missing needed args. Skipping".format(checker.get_name()), file=sys.stderr)
+                    print("[FP-LINT] '{}' missing needed args. Skipping".format(checker.__name__), file=sys.stderr)
                     continue
-                print("[FP-LINT] Running check '{}'".format(checker.get_name()))
+                print("[FP-LINT] Running check '{}'".format(checker.__name__))
                 result = CheckResult(checker.get_identifiers())
                 result = checker().run(result, model, filled_args)
                 problems = result.get_filtered_problems(filters)
@@ -156,7 +205,7 @@ class BaseCheck(abc.ABC):
                     print(result.get_problem_message(problem), file=sys.stderr)
                 all_clear = all_clear and not problems
             except Exception as exc:
-                print("[ERROR] {} failed: {}".format(checker.get_name(), exc), file=sys.stderr)
+                print("[ERROR] {} failed: {}".format(checker.__name__, exc), file=sys.stderr)
                 all_clear = False
         return all_clear
 

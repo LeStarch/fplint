@@ -9,15 +9,11 @@ import os
 from pathlib import Path
 from typing import List, Dict
 
-from fprime.fbuild.settings import IniSettings
 
-from fprime_ac.models.Port import Port
-from fprime_ac.models.Topology import Topology
+from fplint.model.patcher import load_patched_topology
+from fplint.model.patcher import InconsistencyException, Component, Port, Topology, get_comp_by_name, get_port_by_name
 
-from fplint.load import load_model
-
-from .check import BaseCheck, CheckSeverity, CheckResult
-from .command_ports import CommandPorts
+from fplint.check import CheckBase, CheckSeverity, CheckResult
 
 
 class HubResultDelegator(CheckResult):
@@ -26,19 +22,9 @@ class HubResultDelegator(CheckResult):
         """ Remaps problems for hub namespace """
         super().add_problem("hub-", *args, **kwargs)
 
-class HubLinter(BaseCheck):
+class HubLinter(CheckBase):
     """ Hub linter """
     PORT_PAIRS = {"portIn": "portOut", "portOut": "portIn", "buffersIn": "buffersOut", "buffersOut": "buffersIn"}
-
-    @staticmethod
-    def load_with_remote_settings(topology):
-        """ """
-        settings_wd = topology.parent.parent
-        settings = IniSettings.load(None, cwd=settings_wd)
-        ac_consts = settings.get("ac_constants", None)
-        if ac_consts and (settings_wd / ac_consts).exists():
-            os.environ["FPRIME_AC_CONSTANTS_FILE"] = str(settings_wd /ac_consts)
-        return load_model(topology)
 
     @staticmethod
     def get_extra_arguments():
@@ -50,7 +36,7 @@ class HubLinter(BaseCheck):
         }
 
     @classmethod
-    def get_identifiers(self) -> Dict[str, CheckSeverity]:
+    def get_identifiers(cls) -> Dict[str, CheckSeverity]:
         """ Returns identifiers produced here."""
         return {
             "hub-ports-not-parallel": CheckSeverity.ERROR,
@@ -61,32 +47,31 @@ class HubLinter(BaseCheck):
     @staticmethod
     def get_component_port(model: Topology, port: Port):
         """ Get the component ports """
-        component = model.get_comp_by_name(port.get_target_comp())
+        component = get_comp_by_name(model, port.get_target_comp())
         if component is None:
             return None
-        return component.get_port_by_name(port.get_target_port(), port.get_target_num())
+        return get_port_by_name(component, port.get_target_port(), port.get_target_num())
 
     @classmethod
     def get_sorted_hub_ports(cls, model: Topology, hub_name: str):
         """ Gets the ports for the hub in index-sorted order """
         ports_dict = {}
-        hub_object = model.get_comp_by_name(hub_name)
+        hub_object = get_comp_by_name(model, hub_name)
         for port_name in cls.PORT_PAIRS.keys():
-            port_zero = hub_object.get_port_by_name(port_name, 0)
-            hub_ports = [hub_object.get_port_by_name(port_name, num) for num in range(0, int(port_zero.get_max_number()))]
+            port_zero = get_port_by_name(hub_object, port_name, 0)
+            hub_ports = [get_port_by_name(hub_object, port_name, num) for num in range(0, int(port_zero.get_max_number()))]
             cmp_ports = [cls.get_component_port(model, port) for port in hub_ports]
             ports_dict[port_name] = list(zip(hub_ports, cmp_ports))
         return ports_dict
 
     def run(self, result: CheckResult, model: Topology, extras: List[str]) -> CheckResult:
         """ Run it """
-        remote_model_path = Path(extras[0])
-        remote_model = self.load_with_remote_settings(remote_model_path)
+        remote_model = load_patched_topology(Path(extras[0]))
         local_model = model
         # Args validation
-        if local_model.get_comp_by_name(extras[1]) is None:
+        if get_comp_by_name(local_model, extras[1]) is None:
             raise Exception("Could not find component '{}' in local topology".format(extras[1]))
-        elif remote_model.get_comp_by_name(extras[2]) is None:
+        elif get_comp_by_name(remote_model, extras[2]) is None:
             raise Exception("Could not find component '{}' in remote topology".format(extras[2]))
 
         # Get comparable sets
@@ -94,9 +79,8 @@ class HubLinter(BaseCheck):
         remote_ports_dict = self.get_sorted_hub_ports(remote_model, extras[2])
 
         for port_key_local, port_key_remote in self.PORT_PAIRS.items():
-            local_hub_ports, local_comp_ports = local_ports_dict.get(port_key_local)
-            remote_hub_ports, remote_comp_ports
-            mega_zip = zip(*, *remote_ports_dict.get(port_key_remote))
+            local_port_pairs = local_ports_dict.get(port_key_local)
+#            mega_zip = zip(*, *remote_ports_dict.get(port_key_remote))
 
             for local_hub_port, local_comp_port, remote_hub_port, remote_comp_port in mega_zip:
                 # Check we don't have any holes
