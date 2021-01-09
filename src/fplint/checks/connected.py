@@ -42,7 +42,8 @@ class PortConnections(CheckBase):
                                                                                             port.get_target_num()),
                                            model, component, port)
                         continue
-                    if target_port.get_max_number() is None or int(target_port.get_max_number()) <= port.get_target_num():
+                    max_num = 1 if target_port.get_max_number() is None else int(target_port.get_max_number())
+                    if max_num <= port.get_target_num():
                         result.add_problem("invalid-target-port-in-connection",
                                            "connected to non-existent port {}.{}:{}. Note: increase configured limits"
                                            .format(target_comp.get_name(), port.get_target_port(),

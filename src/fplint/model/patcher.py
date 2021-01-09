@@ -73,6 +73,7 @@ def load_patched_topology(topology_xml: Path, settings_dir: Path = None) -> Topo
     # Any patching for the AC models will be undone afterwards
     build_roots_old = get_build_roots()
     ac_constants_old = os.environ.get("FPRIME_AC_CONSTANTS_FILE", None)
+    stdout = sys.stdout
     try:
         # Base locations as dictated by the settings file
         base_locations = [settings.get("framework_path"), settings.get("project_root", None)]
@@ -85,6 +86,7 @@ def load_patched_topology(topology_xml: Path, settings_dir: Path = None) -> Topo
             os.environ["FPRIME_AC_CONSTANTS_FILE"] = str(ac_consts)
         # Now that all the environment patching is finished, loads of the toplogy model should run smoothly
         try:
+            sys.stdout = None # Prevent all the stdout output
             return __topology_loader(topology_xml)
         except InconsistencyException as inc:
             raise # Pass through if already inconsistency exception
@@ -93,6 +95,7 @@ def load_patched_topology(topology_xml: Path, settings_dir: Path = None) -> Topo
             raise InconsistencyException("Error when loading model: {}".format(exc)) from exc
     # Clean-up the system state after our loading
     finally:
+        sys.stdout = stdout
         set_build_roots(":".join(build_roots_old))
         if ac_constants_old is not None:
             os.environ["FPRIME_AC_CONSTANTS_FILE"] = ac_constants_old
@@ -183,7 +186,9 @@ def __merge_object_model(amalgam, traits):
         elif amalgam_value is None or amalgam_value == "" or (isinstance(amalgam_value, (list, tuple)) and len(amalgam_value) == 0) or not amalgam_value:
             pass
         elif attr == "_Port__ptype" and amalgam_value.endswith(trait_value):
-            continue
+            pass # Force overwrite of type to the namespaced version
+        elif attr == "_Port__direction":
+            trait_value = trait_value.lower() # Force lowercase directions
         elif attr == "_Component__modeler":
             continue
         elif amalgam_value is not None and trait_value != amalgam_value:

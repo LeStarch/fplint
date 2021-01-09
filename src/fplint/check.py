@@ -37,7 +37,7 @@ class CheckResult:
         self.severities = severity_map
         self.problems = []
 
-    def add_problem(self, ident: str, message: str, top: Topology=None, comp: Component=None, port: Port=None):
+    def add_problem(self, ident: str, message: str, top: Union[Topology,str]=None, comp: Union[Component,str]=None, port: Union[Port,str]=None):
         """ Adds the specified problem with the given message
 
         Registers a problem detected with a check. These identifiers map to the WARNING/ERROR mappings passed in at
@@ -87,7 +87,7 @@ class CheckResult:
     @staticmethod
     def get_problem_message(problem: dict) -> str:
         """ Formats the standard problem message in a repoducible way """
-        return "[{}] {}: {} found issue {}".format(problem.get("severity").name,
+        return "[{}] {}: {} {}".format(problem.get("severity").name,
                                                    problem.get("identifier"),
                                                    problem.get("module"),
                                                    problem.get("message"))
@@ -101,7 +101,7 @@ class CheckBase(abc.ABC):
     """
 
     @staticmethod
-    def get_standard_identifier(topology: Topology = None, component: Component = None, port:Port = None) -> str:
+    def get_standard_identifier(topology: Union[Topology, str] = None, component: Union[Component, str] = None, port: Union[Port, str] = None) -> str:
         """ Takes the model components and returns a str standard identifier
 
         Args:
@@ -207,5 +207,7 @@ class CheckBase(abc.ABC):
             except Exception as exc:
                 print("[ERROR] {} failed: {}".format(checker.__name__, exc), file=sys.stderr)
                 all_clear = False
+            sys.stderr.flush()
+            sys.stdout.flush()
         return all_clear
 
