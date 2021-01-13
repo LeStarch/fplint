@@ -76,7 +76,7 @@ def load_patched_topology(topology_xml: Path, settings_dir: Path = None) -> Topo
     stdout = sys.stdout
     try:
         # Base locations as dictated by the settings file
-        base_locations = [settings.get("framework_path"), settings.get("project_root", None)]
+        base_locations = [settings.get("framework_path", settings_dir.parent), settings.get("project_root", None)]
         base_locations.extend(settings.get("library_locations", []))
 
         # Setup build roots for using the autocoder modules

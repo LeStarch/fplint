@@ -35,7 +35,7 @@ class PortConnections(CheckBase):
                                            model, component, port)
                         continue
                     target_port = get_port_by_name(target_comp, port.get_target_port(), port.get_target_num())
-                    if target_port is None:
+                    if target_port is None or target_port.get_max_number() is None:
                         result.add_problem("invalid-target-port-in-connection",
                                            "connected to non-existent port {}.{}:{}".format(target_comp.get_name(),
                                                                                             port.get_target_port(),
